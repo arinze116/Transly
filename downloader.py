@@ -39,7 +39,11 @@ async def _download_direct(url: str, job_dir: Path, max_size: int) -> Path | Non
                         if total > max_size:
                             raise DownloadError("Download exceeds configured size limit")
                         output.write(chunk)
+    except DownloadError:
+        path.unlink(missing_ok=True)
+        raise
     except (httpx.HTTPError, OSError) as exc:
+        path.unlink(missing_ok=True)
         raise DownloadError(f"Direct media download failed: {exc}") from exc
     return path
 
