@@ -25,7 +25,7 @@ GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
-TRANSLATION_LLM = "groq/compound-mini"  # confirmed available on this account
+TRANSLATION_LLM = "openai/gpt-oss-20b"  # supported replacement for retired Groq model
 GROQ_MAX_BYTES = 25 * 1024 * 1024  # 25 MB hard limit
 
 
