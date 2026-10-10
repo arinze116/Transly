@@ -27,7 +27,7 @@ async def _download_direct(url: str, job_dir: Path, max_size: int) -> Path | Non
         return None
     path = job_dir / f"direct{suffix}"
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=60) as client:
             async with client.stream("GET", url) as response:
                 response.raise_for_status()
                 if response.headers.get("content-length") and int(response.headers["content-length"]) > max_size:
@@ -44,14 +44,14 @@ async def _download_direct(url: str, job_dir: Path, max_size: int) -> Path | Non
     return path
 
 
-async def _download_x_post(url: str, job_dir: Path) -> Path | None:
+async def _download_x_post(url: str, job_dir: Path, max_size: int) -> Path | None:
     """Use X's public syndication response for posts yt-dlp cannot recognize."""
     match = re.search(r"(?:x\.com|twitter\.com)/[^/]+/status/(\d+)", url, re.IGNORECASE)
     if not match:
         return None
     endpoint = f"https://cdn.syndication.twimg.com/tweet-result?id={match.group(1)}&lang=en"
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=30) as client:
             response = await client.get(endpoint)
             response.raise_for_status()
             payload = response.json()
@@ -69,10 +69,20 @@ async def _download_x_post(url: str, job_dir: Path) -> Path | None:
             if not variants:
                 return None
             selected = max(variants, key=lambda item: item.get("bitrate", 0))
-            media = await client.get(selected["url"])
-            media.raise_for_status()
+            media_url = selected["url"]
+            await validate_resolved_host(media_url)
             path = job_dir / "x-media.mp4"
-            path.write_bytes(media.content)
+            async with client.stream("GET", media_url) as media:
+                media.raise_for_status()
+                if media.headers.get("content-length") and int(media.headers["content-length"]) > max_size:
+                    raise DownloadError("Download exceeds configured size limit")
+                total = 0
+                with path.open("wb") as output:
+                    async for chunk in media.aiter_bytes():
+                        total += len(chunk)
+                        if total > max_size:
+                            raise DownloadError("Download exceeds configured size limit")
+                        output.write(chunk)
             return path
     except (httpx.HTTPError, ValueError, OSError) as exc:
         raise DownloadError(f"X media download failed: {exc}") from exc
@@ -86,7 +96,7 @@ async def download_url(url: str, directory: Path, max_size_mb: int = 500, timeou
     direct = await _download_direct(url, job_dir, max_size_mb * 1024 * 1024)
     if direct is not None:
         return direct
-    x_media = await _download_x_post(url, job_dir)
+    x_media = await _download_x_post(url, job_dir, max_size_mb * 1024 * 1024)
     if x_media is not None:
         return x_media
 
