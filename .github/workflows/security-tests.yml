@@ -26,3 +26,5 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Compile Python files
         run: python -m compileall -q .
+      - name: Validate firewall script syntax
+        run: bash -n deploy/transly-egress-firewall.sh
