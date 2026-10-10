@@ -33,16 +33,16 @@ nft add rule inet transly_egress output meta skuid "$uid" ip6 daddr ::1 tcp dpor
 # documentation, benchmarking, multicast, and reserved ranges.
 nft add rule inet transly_egress output meta skuid "$uid" ip daddr {
   0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8,
-  169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24,
+  168.63.129.16/32, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24,
   192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24,
-  203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4
+  203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4, 100.100.100.200/32
 } reject
 
 # IPv6 local, mapped-IPv4, local-use translation, discard, documentation,
 # unique-local, link-local, and multicast ranges.
 nft add rule inet transly_egress output meta skuid "$uid" ip6 daddr {
   ::/128, ::1/128, ::ffff:0:0/96, 64:ff9b::/96, 64:ff9b:1::/48,
-  100::/64, 2001:db8::/32, fc00::/7, fe80::/10, ff00::/8
+  100::/64, 2001::/23, 2001:db8::/32, 2002::/16, fc00::/7, fe80::/10, ff00::/8
 } reject
 
 echo "SSRF egress restrictions installed for UID $uid (transly)."
