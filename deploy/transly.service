@@ -1,0 +1,31 @@
+[Unit]
+Description=Transly Telegram bot
+Requires=transly-egress-firewall.service
+After=network-online.target transly-egress-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=transly
+Group=transly
+WorkingDirectory=/opt/transly
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/transly/.venv/bin/python /opt/transly/bot.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/tmp /var/lib/transly
+
+[Install]
+WantedBy=multi-user.target

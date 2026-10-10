@@ -1,0 +1,13 @@
+[Unit]
+Description=Transly SSRF egress firewall
+DefaultDependencies=no
+After=local-fs.target
+Before=transly.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/transly-egress-firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
