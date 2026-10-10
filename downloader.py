@@ -84,7 +84,11 @@ async def _download_x_post(url: str, job_dir: Path, max_size: int) -> Path | Non
                             raise DownloadError("Download exceeds configured size limit")
                         output.write(chunk)
             return path
+    except DownloadError:
+        (job_dir / "x-media.mp4").unlink(missing_ok=True)
+        raise
     except (httpx.HTTPError, ValueError, OSError) as exc:
+        (job_dir / "x-media.mp4").unlink(missing_ok=True)
         raise DownloadError(f"X media download failed: {exc}") from exc
 
 
