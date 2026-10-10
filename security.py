@@ -21,7 +21,7 @@ def validate_url(value: str) -> str:
         address = ipaddress.ip_address(host)
     except ValueError:
         address = None
-    if address is not None and (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved):
+    if address is not None and (not address.is_global):
         raise UnsafeURL("Private addresses are not allowed")
     return value
 
