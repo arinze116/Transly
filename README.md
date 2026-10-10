@@ -42,7 +42,7 @@ Telegram Bot API downloads are limited to 20 MB by default; larger media should 
 
 ## How it works
 
-1. URLs are validated against private-network/SSRF access and downloaded with `yt-dlp`
+1. URL preflight rejects private/non-global addresses, direct and X-media HTTP fetches disable redirects and enforce a download-size cap. `yt-dlp` performs additional network requests internally, and DNS preflight alone cannot prevent DNS rebinding; deploy the downloader with network egress restrictions that block loopback, private, link-local, and cloud-metadata ranges.
 2. Video audio is extracted and normalised with `ffmpeg`
 3. Audio is transcribed to English via Groq Whisper Large v3
 4. Non-English segments are translated via Groq LLaMA
