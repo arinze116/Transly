@@ -92,5 +92,7 @@ def test_split_audio_rejects_chunk_over_provider_limit(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(transcriber.subprocess, "run", fake_run)
+    chunks_dir = tmp_path / "chunks"
+    chunks_dir.mkdir()
     with pytest.raises(TranscriptionError, match="still exceeds Groq"):
-        transcriber._split_audio(source, tmp_path / "chunks", 10, 20)
+        transcriber._split_audio(source, chunks_dir, 10, 20)
