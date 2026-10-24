@@ -13,6 +13,7 @@ are NOT supported and cause 404s.
 import asyncio
 import json
 import logging
+import math
 from pathlib import Path
 import subprocess
 import tempfile
@@ -280,7 +281,7 @@ def _probe_duration(path: Path) -> float:
 
 def _split_audio(path: Path, output_dir: Path, duration: float, chunk_seconds: int) -> list[Path]:
     chunks: list[Path] = []
-    count = max(1, int((duration + chunk_seconds - 1) // chunk_seconds))
+    count = max(1, math.ceil(duration / chunk_seconds))
     for index in range(count):
         start = index * chunk_seconds
         length = min(chunk_seconds, duration - start)
