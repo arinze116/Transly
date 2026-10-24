@@ -13,7 +13,10 @@ are NOT supported and cause 404s.
 import asyncio
 import json
 import logging
+import math
 from pathlib import Path
+import subprocess
+import tempfile
 
 import httpx
 
@@ -26,7 +29,9 @@ GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 TRANSLATION_LLM = "openai/gpt-oss-20b"  # supported replacement for retired Groq model
-GROQ_MAX_BYTES = 25 * 1024 * 1024  # 25 MB hard limit
+GROQ_MAX_BYTES = 25 * 1024 * 1024  # Groq per-request hard limit
+GROQ_SAFE_BYTES = 23 * 1024 * 1024  # conservative headroom for decimal MB and multipart overhead
+AUDIO_CHUNK_SECONDS = 20 * 60
 
 
 class TranscriptionError(Exception):
@@ -57,14 +62,15 @@ class GroqTranscriber:
 
     async def _post_audio(self, path: Path) -> dict:
         """Transcribe audio via Groq. Returns verbose_json dict."""
-        file_bytes = path.read_bytes()
-
-        if len(file_bytes) > GROQ_MAX_BYTES:
-            mb = len(file_bytes) / 1024 / 1024
+        file_size = path.stat().st_size
+        if file_size > GROQ_MAX_BYTES:
+            mb = file_size / 1024 / 1024
             raise TranscriptionError(
                 f"Audio file is {mb:.1f} MB — Groq's limit is 25 MB. "
-                "Re-encode with: ffmpeg -i input -ac 1 -ar 16000 -b:a 32k out.mp3"
+                "The audio must be compressed or split before transcription."
             )
+
+        file_bytes = path.read_bytes()
 
         # Only send parameters Groq actually accepts
         fields = {
@@ -128,37 +134,55 @@ class GroqTranscriber:
     # ------------------------------------------------------------------
 
     async def transcribe_structured(self, path: Path, duration: float = 0) -> TranscriptResult:
-        """Transcribe audio and return a TranscriptResult with segments."""
+        """Transcribe compressed audio, splitting oversized files into ordered chunks."""
         try:
-            data = await self._post_audio(path)
+            if path.stat().st_size <= GROQ_SAFE_BYTES:
+                data = await self._post_audio(path)
+                return _result_from_data(data, duration)
 
-            detected_language = data.get("language", "und")
-            actual_duration = float(data.get("duration", duration))
-            raw_segments = data.get("segments", [])
+            total_duration = duration or await asyncio.to_thread(_probe_duration, path)
+            if total_duration <= 0:
+                raise TranscriptionError("Could not determine audio duration for chunking")
 
-            if raw_segments:
-                segments = [
-                    TranscriptSegment(
-                        start=float(seg.get("start", 0)),
-                        end=float(seg.get("end", 0)),
-                        speaker="speaker_1",
-                        text=seg.get("text", "").strip(),
-                    )
-                    for seg in raw_segments
-                    if seg.get("text", "").strip()
-                ]
-            elif data.get("text", "").strip():
-                segments = [
-                    TranscriptSegment(0, actual_duration, "speaker_1", data["text"].strip())
-                ]
-            else:
-                segments = []
+            # Keep all temporary chunks beside the job audio so the job's parent
+            # cleanup also covers them if the process is interrupted.
+            with tempfile.TemporaryDirectory(prefix="transly-chunks-", dir=str(path.parent)) as temp_dir:
+                chunks = await asyncio.to_thread(
+                    _split_audio, path, Path(temp_dir), total_duration, AUDIO_CHUNK_SECONDS
+                )
+                combined_segments: list[TranscriptSegment] = []
+                detected_language = "und"
+                observed_duration = 0.0
 
-            return TranscriptResult(detected_language, actual_duration, segments, "groq_whisper")
+                for index, chunk in enumerate(chunks):
+                    offset = index * AUDIO_CHUNK_SECONDS
+                    chunk_duration = min(AUDIO_CHUNK_SECONDS, max(0.0, total_duration - offset))
+                    data = await self._post_audio(chunk)
+                    result = _result_from_data(data, chunk_duration)
+                    if detected_language == "und" and result.language != "und":
+                        detected_language = result.language
+                    observed_duration += result.duration
+                    for segment in result.segments:
+                        combined_segments.append(
+                            TranscriptSegment(
+                                start=segment.start + offset,
+                                end=segment.end + offset,
+                                speaker=segment.speaker,
+                                text=segment.text,
+                                english_text=segment.english_text,
+                            )
+                        )
+
+            return TranscriptResult(
+                detected_language,
+                total_duration or observed_duration,
+                combined_segments,
+                "groq_whisper",
+            )
 
         except TranscriptionError:
             raise
-        except (OSError, ValueError, TypeError, KeyError) as exc:
+        except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
             raise TranscriptionError(str(exc)) from exc
 
     async def translate_segments(self, payload: str, source_language: str) -> list[str]:
@@ -215,6 +239,69 @@ class GroqTranscriber:
         """Convenience: transcribe and return plain English text string."""
         result = await self.transcribe_structured(path)
         return "\n\n".join(seg.text for seg in result.segments)
+
+
+def _result_from_data(data: dict, duration: float = 0) -> TranscriptResult:
+    detected_language = data.get("language", "und")
+    actual_duration = float(data.get("duration", duration))
+    raw_segments = data.get("segments", [])
+    if raw_segments:
+        segments = [
+            TranscriptSegment(
+                start=float(seg.get("start", 0)),
+                end=float(seg.get("end", 0)),
+                speaker="speaker_1",
+                text=seg.get("text", "").strip(),
+            )
+            for seg in raw_segments
+            if seg.get("text", "").strip()
+        ]
+    elif data.get("text", "").strip():
+        segments = [TranscriptSegment(0, actual_duration, "speaker_1", data["text"].strip())]
+    else:
+        segments = []
+    return TranscriptResult(detected_language, actual_duration, segments, "groq_whisper")
+
+
+def _probe_duration(path: Path) -> float:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise TranscriptionError("Could not read audio duration for chunking")
+    try:
+        return float(result.stdout.strip())
+    except ValueError as exc:
+        raise TranscriptionError("Could not read audio duration for chunking") from exc
+
+
+def _split_audio(path: Path, output_dir: Path, duration: float, chunk_seconds: int) -> list[Path]:
+    chunks: list[Path] = []
+    count = max(1, math.ceil(duration / chunk_seconds))
+    for index in range(count):
+        start = index * chunk_seconds
+        length = min(chunk_seconds, duration - start)
+        output = output_dir / f"chunk-{index:04d}.mp3"
+        result = subprocess.run(
+            [
+                "ffmpeg", "-nostdin", "-y", "-i", str(path), "-ss", str(start),
+                "-t", str(length), "-vn", "-ac", "1", "-ar", "16000",
+                "-c:a", "libmp3lame", "-b:a", "32k", str(output),
+            ],
+            capture_output=True, text=True, timeout=900,
+        )
+        if result.returncode != 0 or not output.exists() or output.stat().st_size == 0:
+            detail = result.stderr.strip().splitlines()
+            reason = detail[-1] if detail else "unknown FFmpeg error"
+            raise TranscriptionError(f"Could not split oversized audio: {reason}")
+        if output.stat().st_size > GROQ_MAX_BYTES:
+            raise TranscriptionError("An audio chunk still exceeds Groq's 25 MiB request limit")
+        chunks.append(output)
+    return chunks
 
 
 # Backward-compat alias — providers.py / bot.py import GeminiTranscriber

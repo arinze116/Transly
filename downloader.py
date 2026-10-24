@@ -137,9 +137,9 @@ async def download_url(url: str, directory: Path, max_size_mb: int = 500, timeou
 
 
 async def extract_audio(path: Path) -> Path:
-    # Normalize every input to one speech-friendly format. This avoids relying
-    # on the provider accepting every container/codec Telegram or yt-dlp emits.
-    output = path.with_name("normalized.wav")
+    # Compress speech audio instead of creating a very large uncompressed WAV.
+    # 32 kbps mono MP3 is about 14.4 MB per hour and is supported by Groq.
+    output = path.with_name("normalized.mp3")
 
     def run() -> None:
         probe = subprocess.run(
@@ -150,7 +150,8 @@ async def extract_audio(path: Path) -> Path:
             raise NoAudioTrackError("media contains no audio stream")
         command = [
             "ffmpeg", "-nostdin", "-y", "-i", str(path), "-vn",
-            "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(output),
+            "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "32k",
+            str(output),
         ]
         result = subprocess.run(command, capture_output=True, text=True, timeout=900)
         if result.returncode != 0:
