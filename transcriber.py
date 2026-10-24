@@ -30,7 +30,7 @@ GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 DEFAULT_WHISPER_MODEL = "whisper-large-v3"
 TRANSLATION_LLM = "openai/gpt-oss-20b"  # supported replacement for retired Groq model
 GROQ_MAX_BYTES = 25 * 1024 * 1024  # Groq per-request hard limit
-GROQ_SAFE_BYTES = 24 * 1024 * 1024  # leave headroom below the provider limit
+GROQ_SAFE_BYTES = 23 * 1024 * 1024  # conservative headroom for decimal MB and multipart overhead
 AUDIO_CHUNK_SECONDS = 20 * 60
 
 
