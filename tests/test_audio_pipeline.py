@@ -97,3 +97,22 @@ def test_split_audio_rejects_chunk_over_provider_limit(tmp_path, monkeypatch):
     chunks_dir.mkdir()
     with pytest.raises(TranscriptionError, match="still exceeds Groq"):
         transcriber._split_audio(source, chunks_dir, 10, 20)
+
+
+def test_split_audio_rounds_fractional_duration_up(tmp_path, monkeypatch):
+    source = tmp_path / "source.mp3"
+    source.write_bytes(b"source")
+    chunks_dir = tmp_path / "chunks"
+    chunks_dir.mkdir()
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"chunk")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(transcriber.subprocess, "run", fake_run)
+    chunks = transcriber._split_audio(source, chunks_dir, 2400.5, 1200)
+
+    assert len(chunks) == 3
+    assert len(commands) == 3
