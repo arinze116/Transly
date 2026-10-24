@@ -88,7 +88,8 @@ def test_split_audio_rejects_chunk_over_provider_limit(tmp_path, monkeypatch):
     source.write_bytes(b"source")
 
     def fake_run(command, **kwargs):
-        Path(command[-1]).write_bytes(b"x" * (GROQ_MAX_BYTES + 1))
+        with Path(command[-1]).open("wb") as output:
+            output.truncate(GROQ_MAX_BYTES + 1)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(transcriber.subprocess, "run", fake_run)
